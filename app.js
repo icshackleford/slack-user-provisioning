@@ -9,7 +9,7 @@ const app = new App({
 });
 
 // Health check endpoint
-app.receiver.app.get('/health', (req, res) => {
+app.receiver.router.get('/health', (req, res) => {
   res.status(200).json({ status: 'healthy' });
 });
 
