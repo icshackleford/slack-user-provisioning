@@ -224,27 +224,120 @@ app.action('confirm_import', async ({ ack, body, client }) => {
 // Open import modal for CSV upload
 async function openImportModal(client, command) {
   try {
-    // Get user's channels
+    // Get all channels (public and private)
     const channels = await client.conversations.list({
       types: 'public_channel,private_channel',
-      exclude_archived: true
+      exclude_archived: true,
+      limit: 1000
     });
     
-    // Filter to channels the user is a member of
     const userChannels = [];
-    for (const channel of channels.channels.slice(0, 100)) {
+    const botNotInChannels = [];
+    
+    for (const channel of channels.channels) {
       try {
+        // Check if bot is a member of this channel
         const members = await client.conversations.members({ channel: channel.id });
+        const botUserId = (await client.auth.test()).user_id;
+        
         if (members.members.includes(command.user_id)) {
-          userChannels.push({
-            text: { type: 'plain_text', text: `#${channel.name}` },
-            value: channel.id
-          });
+          // User is in this channel
+          if (members.members.includes(botUserId)) {
+            // Bot is also in channel - can manage it
+            userChannels.push({
+              text: { 
+                type: 'plain_text', 
+                text: `${channel.is_private ? '🔒' : '#'}${channel.name}` 
+              },
+              value: channel.id
+            });
+          } else {
+            // Bot is NOT in channel - show as unavailable
+            botNotInChannels.push({
+              text: { 
+                type: 'plain_text', 
+                text: `${channel.is_private ? '🔒' : '#'}${channel.name} (Bot not added)` 
+              },
+              value: `unavailable_${channel.id}`
+            });
+          }
         }
       } catch (e) {
+        // Can't access this channel
         continue;
       }
     }
+    
+    // Combine available channels first, then unavailable ones
+    const allChannelOptions = [
+      ...userChannels,
+      ...botNotInChannels
+    ];
+    
+    const blocks = [
+      {
+        type: 'section',
+        text: {
+          type: 'mrkdwn',
+          text: '*Step 1:* Select the channel to import users into:'
+        }
+      }
+    ];
+    
+    if (allChannelOptions.length > 0) {
+      blocks.push({
+        type: 'input',
+        block_id: 'channel_select',
+        element: {
+          type: 'static_select',
+          action_id: 'selected_channel',
+          placeholder: { type: 'plain_text', text: 'Choose a channel...' },
+          options: allChannelOptions
+        },
+        label: { type: 'plain_text', text: 'Target Channel' }
+      });
+    } else {
+      blocks.push({
+        type: 'section',
+        text: {
+          type: 'mrkdwn',
+          text: '⚠️ No channels available. You need to be a member of channels where the bot is also added.'
+        }
+      });
+    }
+    
+    blocks.push(
+      {
+        type: 'section',
+        text: {
+          type: 'mrkdwn',
+          text: '*Step 2:* Paste your CSV data below:'
+        }
+      },
+      {
+        type: 'input',
+        block_id: 'csv_input',
+        element: {
+          type: 'plain_text_input',
+          action_id: 'csv_data',
+          multiline: true,
+          placeholder: {
+            type: 'plain_text',
+            text: 'email,name\njohn@company.com,John Smith\njane@company.com,Jane Doe'
+          }
+        },
+        label: { type: 'plain_text', text: 'CSV Data' }
+      },
+      {
+        type: 'context',
+        elements: [
+          {
+            type: 'mrkdwn',
+            text: '💡 *Supported formats:* email, username, user_id columns. First row should be headers.\n🔒 *Private channels:* Bot must be added to private channels first.'
+          }
+        ]
+      }
+    );
     
     await client.views.open({
       trigger_id: command.trigger_id,
@@ -253,56 +346,7 @@ async function openImportModal(client, command) {
         callback_id: 'csv_import_modal',
         title: { type: 'plain_text', text: 'Import Users from CSV' },
         submit: { type: 'plain_text', text: 'Next' },
-        blocks: [
-          {
-            type: 'section',
-            text: {
-              type: 'mrkdwn',
-              text: '*Step 1:* Select the channel to import users into:'
-            }
-          },
-          {
-            type: 'input',
-            block_id: 'channel_select',
-            element: {
-              type: 'static_select',
-              action_id: 'selected_channel',
-              placeholder: { type: 'plain_text', text: 'Choose a channel...' },
-              options: userChannels
-            },
-            label: { type: 'plain_text', text: 'Target Channel' }
-          },
-          {
-            type: 'section',
-            text: {
-              type: 'mrkdwn',
-              text: '*Step 2:* Paste your CSV data below:'
-            }
-          },
-          {
-            type: 'input',
-            block_id: 'csv_input',
-            element: {
-              type: 'plain_text_input',
-              action_id: 'csv_data',
-              multiline: true,
-              placeholder: {
-                type: 'plain_text',
-                text: 'email,name\njohn@company.com,John Smith\njane@company.com,Jane Doe'
-              }
-            },
-            label: { type: 'plain_text', text: 'CSV Data' }
-          },
-          {
-            type: 'context',
-            elements: [
-              {
-                type: 'mrkdwn',
-                text: '💡 *Supported formats:* email, username, user_id columns. First row should be headers.'
-              }
-            ]
-          }
-        ]
+        blocks: blocks
       }
     });
   } catch (error) {
@@ -312,10 +356,23 @@ async function openImportModal(client, command) {
 
 // Handle CSV import modal submission
 app.view('csv_import_modal', async ({ ack, body, view, client }) => {
+  const selectedValue = view.state.values.channel_select.selected_channel.selected_option.value;
+  
+  // Check if user selected an unavailable channel
+  if (selectedValue.startsWith('unavailable_')) {
+    await ack({
+      response_action: 'errors',
+      errors: {
+        'channel_select': 'Bot must be added to this channel first. Please add the bot to the private channel and try again.'
+      }
+    });
+    return;
+  }
+  
   await ack();
   
   try {
-    const channelId = view.state.values.channel_select.selected_channel.selected_option.value;
+    const channelId = selectedValue;
     const csvData = view.state.values.csv_input.csv_data.value;
     
     if (!csvData || !csvData.trim()) {
@@ -365,7 +422,7 @@ app.view('csv_import_modal', async ({ ack, body, view, client }) => {
             type: 'section',
             text: {
               type: 'mrkdwn',
-              text: `*Target Channel:* #${channelInfo.channel.name}\n*Users Found:* ${users.length}`
+              text: `*Target Channel:* ${channelInfo.channel.is_private ? '🔒' : '#'}${channelInfo.channel.name}\n*Users Found:* ${users.length}`
             }
           },
           {
@@ -428,43 +485,132 @@ app.view('confirm_csv_import', async ({ ack, body, view, client }) => {
   }
 });
 
-// Parse CSV data from text input
+// Parse CSV data from text input with better error handling
 async function parseCSVData(csvText) {
   return new Promise((resolve) => {
-    const users = [];
-    const lines = csvText.trim().split('\n');
+    console.log('Parsing CSV data:', csvText);
     
-    if (lines.length < 2) {
+    const users = [];
+    const lines = csvText.trim().split('\n').filter(line => line.trim());
+    
+    console.log('CSV lines found:', lines.length);
+    
+    if (lines.length < 1) {
+      console.log('No lines found in CSV');
       resolve([]);
       return;
     }
     
-    // Get headers from first line
-    const headers = lines[0].split(',').map(h => h.trim().toLowerCase());
-    
-    // Process each data line
-    for (let i = 1; i < lines.length; i++) {
-      const values = lines[i].split(',').map(v => v.trim());
-      const row = {};
+    // Handle single line without headers (just data)
+    if (lines.length === 1) {
+      const values = lines[0].split(',').map(v => v.trim());
+      console.log('Single line values:', values);
       
-      headers.forEach((header, index) => {
-        if (values[index]) {
-          row[header] = values[index];
+      // Try to guess the format
+      const user = {};
+      values.forEach((value, index) => {
+        if (value.includes('@')) {
+          user.email = value;
+        } else if (index === 0 && !value.includes('@')) {
+          user.username = value;
+        } else if (index === 1) {
+          user.name = value;
         }
       });
       
-      const user = {
-        email: row.email || row.email_address,
-        username: row.username || row.user,
-        user_id: row.user_id || row.userid,
-        name: row.name || row.display_name
-      };
-      
-      if (user.email || user.username || user.user_id) {
+      if (user.email || user.username) {
         users.push(user);
+        console.log('Added single line user:', user);
+      }
+      resolve(users);
+      return;
+    }
+    
+    // Get headers from first line - be more flexible with parsing
+    const headerLine = lines[0];
+    let headers;
+    
+    // Try comma separation first, then other separators
+    if (headerLine.includes(',')) {
+      headers = headerLine.split(',').map(h => h.trim().toLowerCase());
+    } else if (headerLine.includes('\t')) {
+      headers = headerLine.split('\t').map(h => h.trim().toLowerCase());
+    } else if (headerLine.includes(';')) {
+      headers = headerLine.split(';').map(h => h.trim().toLowerCase());
+    } else {
+      headers = headerLine.split(/\s+/).map(h => h.trim().toLowerCase());
+    }
+    
+    console.log('Headers detected:', headers);
+    
+    // If no clear headers detected, treat first line as data
+    if (!headers.some(h => ['email', 'username', 'user_id', 'name', 'user'].includes(h))) {
+      console.log('No headers detected, treating all lines as data');
+      // Process all lines as data
+      lines.forEach((line, lineIndex) => {
+        const values = line.split(',').map(v => v.trim());
+        console.log(`Line ${lineIndex} values:`, values);
+        
+        const user = {};
+        values.forEach((value, index) => {
+          if (value && value.includes('@')) {
+            user.email = value;
+          } else if (index === 0 && value && !value.includes('@')) {
+            user.username = value;
+          } else if (index === 1 && value) {
+            user.name = value;
+          }
+        });
+        
+        if (user.email || user.username) {
+          users.push(user);
+          console.log(`Added user from line ${lineIndex}:`, user);
+        }
+      });
+    } else {
+      // Process with headers
+      for (let i = 1; i < lines.length; i++) {
+        const line = lines[i];
+        let values;
+        
+        if (line.includes(',')) {
+          values = line.split(',').map(v => v.trim());
+        } else if (line.includes('\t')) {
+          values = line.split('\t').map(v => v.trim());
+        } else if (line.includes(';')) {
+          values = line.split(';').map(v => v.trim());
+        } else {
+          values = line.split(/\s+/).map(v => v.trim());
+        }
+        
+        console.log(`Line ${i} values:`, values);
+        
+        const row = {};
+        headers.forEach((header, index) => {
+          if (values[index] && values[index].trim()) {
+            row[header] = values[index].trim();
+          }
+        });
+        
+        console.log(`Line ${i} parsed row:`, row);
+        
+        const user = {
+          email: row.email || row.email_address || row['e-mail'] || row.mail,
+          username: row.username || row.user || row.handle || row.login,
+          user_id: row.user_id || row.userid || row.id || row.slack_id,
+          name: row.name || row.display_name || row.full_name || row.displayname
+        };
+        
+        console.log(`Line ${i} final user object:`, user);
+        
+        if (user.email || user.username || user.user_id) {
+          users.push(user);
+          console.log(`Added user from line ${i}:`, user);
+        }
       }
     }
     
+    console.log('Final parsed users:', users);
     resolve(users);
   });
 }
