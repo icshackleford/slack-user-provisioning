@@ -37,10 +37,12 @@ app.command('/provision', async ({ command, ack, respond, client }) => {
       await handleListUsers(args[1], respond, client);
     } else if (action === 'import') {
       await openImportModal(client, command);
+    } else if (action === 'csv') {
+      await openFileUploadModal(client, command);
     } else {
       await respond({
         response_type: 'ephemeral',
-        text: 'Usage:\n• `/provision add @user #channel`\n• `/provision remove @user #channel`\n• `/provision list #channel`\n• `/provision import` (for CSV help)'
+        text: 'Usage:\n• `/provision add @user #channel`\n• `/provision remove @user #channel`\n• `/provision list #channel`\n• `/provision import` (paste CSV data)\n• `/provision csv` (upload CSV file)'
       });
     }
   } catch (error) {
@@ -485,7 +487,110 @@ app.view('confirm_csv_import', async ({ ack, body, view, client }) => {
   }
 });
 
-// Parse CSV data from text input with better error handling
+// Open file upload modal for CSV files
+async function openFileUploadModal(client, command) {
+  try {
+    // Get available channels first
+    const channels = await client.conversations.list({
+      types: 'public_channel,private_channel',
+      exclude_archived: true,
+      limit: 1000
+    });
+    
+    const userChannels = [];
+    const botNotInChannels = [];
+    
+    for (const channel of channels.channels) {
+      try {
+        const members = await client.conversations.members({ channel: channel.id });
+        const botUserId = (await client.auth.test()).user_id;
+        
+        if (members.members.includes(command.user_id)) {
+          if (members.members.includes(botUserId)) {
+            userChannels.push({
+              text: { 
+                type: 'plain_text', 
+                text: `${channel.is_private ? '🔒' : '#'}${channel.name}` 
+              },
+              value: channel.id
+            });
+          } else {
+            botNotInChannels.push({
+              text: { 
+                type: 'plain_text', 
+                text: `${channel.is_private ? '🔒' : '#'}${channel.name} (Bot not added)` 
+              },
+              value: `unavailable_${channel.id}`
+            });
+          }
+        }
+      } catch (e) {
+        continue;
+      }
+    }
+    
+    const allChannelOptions = [...userChannels, ...botNotInChannels];
+    
+    await client.views.open({
+      trigger_id: command.trigger_id,
+      view: {
+        type: 'modal',
+        callback_id: 'csv_file_upload_modal',
+        title: { type: 'plain_text', text: 'Upload CSV File' },
+        submit: { type: 'plain_text', text: 'Next' },
+        blocks: [
+          {
+            type: 'section',
+            text: {
+              type: 'mrkdwn',
+              text: '*Step 1:* Select the channel to import users into:'
+            }
+          },
+          {
+            type: 'input',
+            block_id: 'channel_select',
+            element: {
+              type: 'static_select',
+              action_id: 'selected_channel',
+              placeholder: { type: 'plain_text', text: 'Choose a channel...' },
+              options: allChannelOptions
+            },
+            label: { type: 'plain_text', text: 'Target Channel' }
+          },
+          {
+            type: 'section',
+            text: {
+              type: 'mrkdwn',
+              text: '*Step 2:* Upload your CSV file:'
+            }
+          },
+          {
+            type: 'input',
+            block_id: 'file_input',
+            element: {
+              type: 'file_input',
+              action_id: 'csv_file',
+              filetypes: ['csv'],
+              max_files: 1
+            },
+            label: { type: 'plain_text', text: 'CSV File' }
+          },
+          {
+            type: 'context',
+            elements: [
+              {
+                type: 'mrkdwn',
+                text: '📄 *CSV Format:* First column should contain email addresses. Headers optional.\n💡 *Example:* Column A with emails like john@company.com, jane@company.com'
+              }
+            ]
+          }
+        ]
+      }
+    });
+  } catch (error) {
+    console.error('Error opening file upload modal:', error);
+  }
+}
 async function parseCSVData(csvText) {
   return new Promise((resolve) => {
     console.log('Parsing CSV data:', csvText);
