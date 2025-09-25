@@ -218,7 +218,16 @@ app.action('confirm_import', async ({ ack, body, client }) => {
     console.error('Import error:', error);
     await client.chat.postMessage({
       channel: channelId,
-      text: '❌ Import failed. Please try again.'
+      text: 'Import failed. Please try again.',
+      blocks: [
+        {
+          type: 'section',
+          text: {
+            type: 'mrkdwn',
+            text: '❌ Import failed. Please try again.'
+          }
+        }
+      ]
     });
   }
 });
@@ -882,10 +891,27 @@ function extractChannelId(mention) {
 
 async function downloadFile(url) {
   const fetch = require('node-fetch');
-  const response = await fetch(url, {
-    headers: { 'Authorization': `Bearer ${process.env.SLACK_BOT_TOKEN}` }
-  });
-  return response.text();
+  try {
+    console.log('Downloading file from URL:', url);
+    const response = await fetch(url, {
+      headers: { 
+        'Authorization': `Bearer ${process.env.SLACK_BOT_TOKEN}`,
+        'User-Agent': 'SlackBot/1.0'
+      },
+      timeout: 30000 // 30 second timeout
+    });
+    
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+    }
+    
+    const text = await response.text();
+    console.log('Successfully downloaded file, size:', text.length);
+    return text;
+  } catch (error) {
+    console.error('Error downloading file:', error);
+    throw error;
+  }
 }
 
 async function parseCSV(csvData) {
