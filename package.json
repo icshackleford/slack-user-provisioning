@@ -1,0 +1,21 @@
+{
+  "name": "slack-user-provisioning-app",
+  "version": "1.0.0",
+  "description": "A Slack app for provisioning users to channels with CSV import",
+  "main": "app.js",
+  "scripts": {
+    "start": "node app.js",
+    "dev": "nodemon app.js"
+  },
+  "dependencies": {
+    "@slack/bolt": "^3.17.1",
+    "csv-parser": "^3.0.0",
+    "node-fetch": "^2.7.0"
+  },
+  "engines": {
+    "node": ">=14.0.0"
+  },
+  "keywords": ["slack", "bot", "user-provisioning"],
+  "author": "Bradley Shackleford",
+  "license": "Red Hat"
+}
