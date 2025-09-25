@@ -395,8 +395,31 @@ async function processCSVImport(channelId, fileId, client) {
   return { success, failed, existing };
 }
 
-// Start the app
+// Start the app with error handling
 (async () => {
-  await app.start();
-  console.log('⚡️ Slack app is running!');
+  try {
+    // Only start if we have valid-looking credentials
+    if (process.env.SLACK_BOT_TOKEN && 
+        process.env.SLACK_BOT_TOKEN.startsWith('xoxb-') &&
+        process.env.SLACK_SIGNING_SECRET && 
+        process.env.SLACK_SIGNING_SECRET.length > 10) {
+      
+      console.log('Starting Slack app with valid credentials...');
+      await app.start(process.env.PORT || 3000);
+      console.log('⚡️ Slack app is running!');
+      
+    } else {
+      console.log('Starting app without Slack functionality (missing/invalid credentials)');
+      // Start just the Express server for health checks
+      receiver.app.listen(process.env.PORT || 3000, () => {
+        console.log('⚡️ Health check server is running!');
+      });
+    }
+  } catch (error) {
+    console.error('Failed to start app:', error.message);
+    // Still start the health check server
+    receiver.app.listen(process.env.PORT || 3000, () => {
+      console.log('⚡️ Health check server is running (Slack functionality disabled)!');
+    });
+  }
 })();
