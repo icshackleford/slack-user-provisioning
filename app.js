@@ -1,16 +1,21 @@
 const { App } = require('@slack/bolt');
 const csv = require('csv-parser');
 
+// Create app with fallback for missing env vars
 const app = new App({
-  token: process.env.SLACK_BOT_TOKEN,
-  signingSecret: process.env.SLACK_SIGNING_SECRET,
+  token: process.env.SLACK_BOT_TOKEN || 'xoxb-temp',
+  signingSecret: process.env.SLACK_SIGNING_SECRET || 'temp-secret',
   socketMode: false,
   port: process.env.PORT || 3000
 });
 
-// Health check endpoint
+// Health check endpoint - works even without valid Slack credentials
 app.receiver.router.get('/health', (req, res) => {
-  res.status(200).json({ status: 'healthy' });
+  res.status(200).json({ 
+    status: 'healthy',
+    hasSlackToken: !!process.env.SLACK_BOT_TOKEN && process.env.SLACK_BOT_TOKEN !== 'xoxb-temp',
+    hasSigningSecret: !!process.env.SLACK_SIGNING_SECRET && process.env.SLACK_SIGNING_SECRET !== 'temp-secret'
+  });
 });
 
 // Slash command: /provision
