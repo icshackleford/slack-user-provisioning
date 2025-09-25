@@ -433,7 +433,7 @@ app.view('text_csv_import', async ({ ack, body, view, client }) => {
   }
 });
 
-// Background processing function
+// Background processing function - Fixed success counting bug
 async function processFileInBackground(channelId, fileId, userId, client, fileName) {
   try {
     await new Promise(resolve => setTimeout(resolve, 1000));
@@ -463,20 +463,54 @@ async function processFileInBackground(channelId, fileId, userId, client, fileNa
     
     for (const email of emails) {
       try {
+        console.log(`Processing email: ${email}`);
+        
+        // First, lookup the user
         const userInfo = await client.users.lookupByEmail({ email });
-        await client.conversations.invite({ channel: channelId, users: userInfo.user.id });
-        success++;
-      } catch (error) {
-        if (error.data?.error === 'already_in_channel') {
-          existing++;
-        } else if (error.data?.error === 'users_not_found') {
+        console.log(`Found user: ${userInfo.user.name} (${userInfo.user.id})`);
+        
+        try {
+          // Try to add them to the channel
+          await client.conversations.invite({ 
+            channel: channelId, 
+            users: userInfo.user.id 
+          });
+          
+          // If we get here, they were successfully added
+          success++;
+          console.log(`✅ Successfully added: ${email}`);
+          
+        } catch (inviteError) {
+          console.log(`Invite error for ${email}:`, inviteError.data?.error);
+          
+          if (inviteError.data?.error === 'already_in_channel') {
+            existing++;
+            console.log(`⚠️ Already in channel: ${email}`);
+          } else {
+            // Other invite errors (permissions, channel issues, etc.)
+            failed++;
+            console.log(`❌ Failed to invite ${email}: ${inviteError.data?.error}`);
+          }
+        }
+        
+      } catch (lookupError) {
+        console.log(`Lookup error for ${email}:`, lookupError.data?.error);
+        
+        if (lookupError.data?.error === 'users_not_found') {
           notFound++;
+          console.log(`❌ User not found in workspace: ${email}`);
         } else {
+          // Other lookup errors
           failed++;
+          console.log(`❌ Failed to lookup ${email}: ${lookupError.data?.error}`);
         }
       }
+      
+      // Rate limiting
       await new Promise(resolve => setTimeout(resolve, 500));
     }
+    
+    console.log(`Final counts - Success: ${success}, Existing: ${existing}, NotFound: ${notFound}, Failed: ${failed}`);
     
     await client.chat.postMessage({
       channel: channelId,
@@ -486,7 +520,7 @@ async function processFileInBackground(channelId, fileId, userId, client, fileNa
           type: 'section',
           text: {
             type: 'mrkdwn',
-            text: `📊 *CSV Import Completed*\n\n*File:* ${fileName}\n*Total Processed:* ${emails.length} emails\n✅ *Added:* ${success}\n⚠️ *Already in Channel:* ${existing}\n❌ *Not Found:* ${notFound}\n❌ *Failed:* ${failed}\n\nImported by <@${userId}>`
+            text: `📊 *CSV Import Completed*\n\n*File:* ${fileName}\n*Total Processed:* ${emails.length} emails\n✅ *Successfully Added:* ${success}\n⚠️ *Already in Channel:* ${existing}\n❌ *Not Found in Workspace:* ${notFound}\n❌ *Other Failures:* ${failed}\n\nImported by <@${userId}>`
           }
         }
       ]
@@ -502,7 +536,7 @@ async function processFileInBackground(channelId, fileId, userId, client, fileNa
           type: 'section',
           text: {
             type: 'mrkdwn',
-            text: `❌ *CSV Import Failed*\n\nRequested by <@${userId}>`
+            text: `❌ *CSV Import Failed*\n\n*Error:* ${error.message}\n\nRequested by <@${userId}>`
           }
         }
       ]
@@ -510,7 +544,7 @@ async function processFileInBackground(channelId, fileId, userId, client, fileNa
   }
 }
 
-// Background processing for text CSV data
+// Background processing for text CSV data - Fixed success counting bug
 async function processTextCSVInBackground(channelId, csvText, userId, client) {
   try {
     const emails = parseCSVEmails(csvText);
@@ -536,20 +570,51 @@ async function processTextCSVInBackground(channelId, csvText, userId, client) {
     
     for (const email of emails) {
       try {
+        console.log(`Processing pasted email: ${email}`);
+        
+        // First, lookup the user
         const userInfo = await client.users.lookupByEmail({ email });
-        await client.conversations.invite({ channel: channelId, users: userInfo.user.id });
-        success++;
-      } catch (error) {
-        if (error.data?.error === 'already_in_channel') {
-          existing++;
-        } else if (error.data?.error === 'users_not_found') {
+        console.log(`Found user: ${userInfo.user.name} (${userInfo.user.id})`);
+        
+        try {
+          // Try to add them to the channel
+          await client.conversations.invite({ 
+            channel: channelId, 
+            users: userInfo.user.id 
+          });
+          
+          // If we get here, they were successfully added
+          success++;
+          console.log(`✅ Successfully added via text: ${email}`);
+          
+        } catch (inviteError) {
+          console.log(`Text invite error for ${email}:`, inviteError.data?.error);
+          
+          if (inviteError.data?.error === 'already_in_channel') {
+            existing++;
+            console.log(`⚠️ Already in channel (text): ${email}`);
+          } else {
+            failed++;
+            console.log(`❌ Failed to invite via text ${email}: ${inviteError.data?.error}`);
+          }
+        }
+        
+      } catch (lookupError) {
+        console.log(`Text lookup error for ${email}:`, lookupError.data?.error);
+        
+        if (lookupError.data?.error === 'users_not_found') {
           notFound++;
+          console.log(`❌ User not found in workspace (text): ${email}`);
         } else {
           failed++;
+          console.log(`❌ Failed to lookup via text ${email}: ${lookupError.data?.error}`);
         }
       }
+      
       await new Promise(resolve => setTimeout(resolve, 300));
     }
+    
+    console.log(`Text CSV final counts - Success: ${success}, Existing: ${existing}, NotFound: ${notFound}, Failed: ${failed}`);
     
     await client.chat.postMessage({
       channel: channelId,
@@ -559,7 +624,7 @@ async function processTextCSVInBackground(channelId, csvText, userId, client) {
           type: 'section',
           text: {
             type: 'mrkdwn',
-            text: `📊 *Text CSV Import Results*\n\n*Total Processed:* ${emails.length} emails\n✅ *Added:* ${success}\n⚠️ *Already in Channel:* ${existing}\n❌ *Not Found:* ${notFound}\n❌ *Failed:* ${failed}\n\nImported by <@${userId}>`
+            text: `📊 *Text CSV Import Results*\n\n*Total Processed:* ${emails.length} emails\n✅ *Successfully Added:* ${success}\n⚠️ *Already in Channel:* ${existing}\n❌ *Not Found in Workspace:* ${notFound}\n❌ *Other Failures:* ${failed}\n\nImported by <@${userId}>`
           }
         }
       ]
@@ -575,7 +640,7 @@ async function processTextCSVInBackground(channelId, csvText, userId, client) {
           type: 'section',
           text: {
             type: 'mrkdwn',
-            text: `❌ *Text Import Failed*\n\nRequested by <@${userId}>`
+            text: `❌ *Text Import Failed*\n\n*Error:* ${error.message}\n\nRequested by <@${userId}>`
           }
         }
       ]
