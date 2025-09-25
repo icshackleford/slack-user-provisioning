@@ -103,7 +103,10 @@ app.action('start_csv_import', async ({ ack, body, client }) => {
             value: `${channel.id}:${body.actions[0].value}`
           });
         }
-      } catch (e) { /* Skip inaccessible channels */ }
+      } catch (e) {
+        // Skip inaccessible channels
+        continue;
+      }
     }
     
     await client.views.open({
@@ -388,3 +391,4 @@ async function processCSVImport(channelId, fileId, client) {
 (async () => {
   await app.start();
   console.log('⚡️ Slack app is running!');
+})();
