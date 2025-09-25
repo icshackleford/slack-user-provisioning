@@ -1,21 +1,24 @@
-const { App } = require('@slack/bolt');
+const { App, ExpressReceiver } = require('@slack/bolt');
 const csv = require('csv-parser');
 
-// Create app with fallback for missing env vars
-const app = new App({
-  token: process.env.SLACK_BOT_TOKEN || 'xoxb-temp',
-  signingSecret: process.env.SLACK_SIGNING_SECRET || 'temp-secret',
-  socketMode: false,
-  port: process.env.PORT || 3000
+// Create a custom receiver to add health check
+const receiver = new ExpressReceiver({
+  signingSecret: process.env.SLACK_SIGNING_SECRET || 'temp-secret'
 });
 
-// Health check endpoint - works even without valid Slack credentials
-app.receiver.router.get('/health', (req, res) => {
+// Add health check route to the receiver
+receiver.app.get('/health', (req, res) => {
   res.status(200).json({ 
     status: 'healthy',
     hasSlackToken: !!process.env.SLACK_BOT_TOKEN && process.env.SLACK_BOT_TOKEN !== 'xoxb-temp',
     hasSigningSecret: !!process.env.SLACK_SIGNING_SECRET && process.env.SLACK_SIGNING_SECRET !== 'temp-secret'
   });
+});
+
+// Create app with custom receiver
+const app = new App({
+  token: process.env.SLACK_BOT_TOKEN || 'xoxb-temp',
+  receiver: receiver
 });
 
 // Slash command: /provision
